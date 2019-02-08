@@ -7,11 +7,11 @@
 #include "util.h"
 
 #define WARN(opt, fmt, ...) docopt_diagnostic(    \
-    "warning", "on pattern: %.*s\n\n" fmt "\n\n", \
+    "warning", "on pattern: %.*s\n" fmt "\n\n", \
     (opt)->pattern_len, (opt)->pattern, __VA_ARGS__)
 
 #define ERROR(opt, fmt, ...) docopt_diagnostic( \
-    "error", "on pattern: %.*s\n\n" fmt "\n\n", \
+    "error", "on pattern: %.*s\n" fmt "\n\n", \
     (opt)->pattern_len, (opt)->pattern, __VA_ARGS__)
 
 static bool is_arg_char(char c)
@@ -58,19 +58,23 @@ static const char* parse_opt_arg_spec(
         ++iter;
 
     int len = 0;
+    const char* arg;
     if (*iter == '<') {
         ++iter;
+        arg = iter;
         while (is_arg_char(iter[len]))
             ++len;
         if (len == 0 || iter[len] != '>') {
             ERROR(opt, "unterminated argument name, expected '>' before '%c'.",
                 iter[len]);
-            iter += len + 1;
             return NULL;
         }
+        iter += len + 1;
     } else if (isupper(*iter)) {
+        arg = iter;
         while (isupper(iter[len]) && is_cmd_char(tolower(iter[len])))
             ++len;
+        iter += len;
     } else {
         ERROR(opt, "expected an argument name, found '%c'", *iter);
         return NULL;
@@ -78,31 +82,31 @@ static const char* parse_opt_arg_spec(
 
     bool new_spec = !(opt->prop & OPT_ARG);
     if (!new_spec) {
-        if (strncmp(opt->arg_name, iter, len) != 0
+        if (strncmp(opt->arg_name, arg, len) != 0
             || is_optional != (bool)(opt->prop & OPT_ARG_OPTIONAL)) {
             // arg spec doesn't match
-            const char* old_optional = (opt->prop & OPT_ARG_OPTIONAL) ? "optional " : "";
+            const char* old_optional =
+                (opt->prop & OPT_ARG_OPTIONAL) ? "optional " : "";
             const char* new_optional = is_optional ? "optional " : "";
             WARN(opt, "argument specification overrides previous one, "
                       "expected %s'%.*s', found %s'%.*s'.",
                 old_optional, opt->arg_name_len, opt->arg_name,
-                new_optional, len, iter);
+                new_optional, len, arg);
         }
     }
 
-    opt->arg_name = iter;
+    opt->arg_name = arg;
     opt->arg_name_len = len;
-    iter += len + 1;
-    if (!strncmp(iter, "  ", 2) || *str_skip_blank(iter) == '\n')
+    opt->prop |= OPT_ARG;
 
-        if (is_optional) {
-            if (*iter != ']') {
-                ERROR(opt, "expected ']', found '%c'.", *iter);
-                return NULL;
-            }
-            opt->prop |= OPT_ARG_OPTIONAL;
-            ++iter;
+    if (is_optional) {
+        if (*iter != ']') {
+            ERROR(opt, "expected ']', found '%c'.", *iter);
+            return NULL;
         }
+        ++iter;
+        opt->prop |= OPT_ARG_OPTIONAL;
+    }
 
     return iter;
 }
@@ -113,20 +117,16 @@ static const char* parse_long_option(
     // long option pattern: ([no-])? /[a-zA-Z0-9_-]+/ <opt_arg_spec>
     if (*iter == '[') {
         ++iter;
-
-        if (!strncmp(iter, "no-", 3)) {
-            iter += 3;
-        } else {
-            ERROR(opt, "only [no-] (case sensitive) is allowed, found '%c'.", *iter);
+        if (strncmp(iter, "no-", 3) != 0) {
+            ERROR(opt, "only [no-] is allowed, found '%c'.", *iter);
             return NULL;
         }
-
+        iter += 3;
         if (*iter != ']') {
             ERROR(opt, "expected ']', found '%c'.", *iter);
             return NULL;
         }
         ++iter;
-
         opt->prop |= OPT_NEGATABLE;
     }
 
@@ -174,7 +174,7 @@ const char* parse_short_option(struct option* opt, const char* iter)
     ++iter;
 
     const char* end = str_skip_blank(iter);
-    if (*end == ',' || *end == '\n' || !strncmp(iter, "  ", 2)) {
+    if (!*end || *end == ',' || *end == '\n' || !strncmp(iter, "  ", 2)) {
         return iter;
     }
 
@@ -187,91 +187,98 @@ const char* parse_short_option(struct option* opt, const char* iter)
 
 struct option* get_options_list(const char* iter)
 {
-    // options have the pattern:
-    // /^\w+/ ( ( '--' <long_opt> )
-    //        | ( '-' <short_opt> ((/,\w+/ | ' ') '--' long_opt>)? ) )
-    // for the patterns of <short_opt> and <long_opt> see functions
-    // parse_short_option and parse_long_option respectively.
-    // should this be indentation sensitive?
+    // options pattern : /^\w+/ ( ( '--' <long_opt> )
+    //                 | ( '-' <short_opt> ((/,\w+/ | ' ') '--' long_opt>)? ) )
 
     struct option* head = NULL;
     struct option** opt = &head;
-    int option_start_column = -1; // unspecified yet.
+    // for tracking the patterns column start
+    int indent = -1;
+    // used to report warning about erroneous non-pattern formatting only once
+    bool warned_about_formatting = false;
 
-    for (; *iter || !strncmp(iter, "\n\n", 2); iter = str_skip_line(iter)) {
-        // find next line with an option.
-        if (option_start_column == -1) {
-            const char* opt_start = str_skip_blank(iter);
-            if (*opt_start != '-')
+    // options section end with an unindented line (has an indentation level
+    // that is below the indentation level of option patterns), or a line that
+    // has two consecutive newlines
+    for (; strncmp(iter, "\n\n", 2) != 0; iter = str_skip_line(iter)) {
+        int col = str_skip_blank(iter) - iter;
+        if (indent == -1) {
+            if (iter[col] != '-')
                 continue;
-            option_start_column = opt_start - iter;
-            iter = opt_start;
-        } else {
-            int i = str_skip_blank(iter) - iter;
-            if (i != option_start_column)
+            indent = col;
+        } else if (iter[col] == '\n' || col > indent) {
+            continue;
+        } else if (col < indent) {
+            break;
+        } else if (iter[col] != '-') {
+            // warn about erroneous formatting.
+            if (warned_about_formatting)
                 continue;
-            iter = iter + i;
-        }
-
-        const char* line_end;
-        if (*iter == '-') {
-            ++iter;
-            line_end = iter;
-            while (*line_end && strncmp(line_end, "  ", 2) != 0
-                && *line_end != '\n')
-                ++line_end;
-
-            if (!*opt)
-                *opt = calloc(1, sizeof(struct option));
-            (*opt)->pattern = iter;
-            (*opt)->pattern_len = line_end - iter;
-        } else {
-            line_end = str_skip_line(iter);
+            const char* line = iter + col;
+            int line_len = str_skip_line(line) - line;
             docopt_diagnostic(
-                "warning", "on line: %.*s\n\n"
-                           "line indentation matches that of a line with "
-                           "a pattern.\n"
-                           "suggestion: add more indentation.",
-                line_end - iter, iter);
+                "warning",
+                "on line: %.*s\n"
+                "line indentation matches that of a line with a pattern.\n"
+                "suggestion: add more indentation.\n"
+                "this warning is reported only once, subsequent formatting "
+                "errors won't be reported.\n\n",
+                line_len - 1, line);
+            warned_about_formatting = true;
             continue;
         }
+        iter += col;
 
-        if (*iter != '-') {
+        int pattern_len = 0;
+        while (iter[pattern_len] && strncmp(iter + pattern_len, "  ", 2) != 0
+            && iter[pattern_len] != '\n') {
+            ++pattern_len;
+        }
+
+        if (!*opt)
+            *opt = calloc(1, sizeof(**opt));
+        else
+            memset(*opt, 0, sizeof(**opt));
+        (*opt)->pattern = iter;
+        (*opt)->pattern_len = pattern_len;
+
+        if (iter[0] == '-' && iter[1] != '-') {
             // TODO: handle special case "-" used commonly for stdin
-            const char* short_end = parse_short_option(*opt, iter);
+            const char* short_end = parse_short_option(*opt, iter + 1);
             if (!short_end)
                 continue;
             iter = short_end;
 
-            if (strncmp(iter, "  ", 2) != 0) {
-                // seperator one of: ' ' | ',' | ', '
-                // yikes.
-                if (*iter == ' ')
-                    ++iter;
-                if (*iter == ',')
-                    ++iter;
-                if (*iter == ' ')
-                    ++iter;
+            const char *next_col = str_skip_blank(iter);
+            if (*next_col == ',' || strncmp(iter, "  ", 2) != 0) {
+                // seperator one of: ' ' | ',' |
+                if (*next_col == ',') {
+                    ++next_col;
+                    next_col = str_skip_blank(next_col);
+                }
+                iter = next_col;
 
-                if (*iter != '-')
+                if (strncmp(iter, "--", 2) != 0)
                     WARN(*opt,
                         "expected a long option '--<option>', found '%c'.",
                         *iter);
-                ++iter;
             }
         }
 
-        if (*iter == '-') {
+        if (!strncmp(iter, "--", 2)) {
             // TODO: handle special case "--" used commonly for stopping
             // options parsing
-            ++iter;
-            const char* long_end = parse_long_option(*opt, iter);
+            const char* long_end = parse_long_option(*opt, iter + 2);
             if (!long_end)
                 continue;
+            iter = long_end;
         }
 
         opt = &(*opt)->next;
     }
 
+    // make sure we don't leave an allocated but not used memory
+    if (*opt)
+        free(*opt);
     return head;
 }

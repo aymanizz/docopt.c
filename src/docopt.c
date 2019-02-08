@@ -72,13 +72,14 @@ static int parse(const char* src)
     struct option* options = get_options_list(options_start);
 
     for (struct option* opt = options; opt; opt = opt->next) {
-        printf("option --( %.*s )-- %c | %.*s:\n\targ=%.*s, required=%s, "
-               "negatable=%s\n\n",
+        printf("option ( %.*s ):\n\t %c | %.*s:\n\targ=%.*s, optional=%s, "
+               "negatable=%s, negated=%s\n\n",
                opt->pattern_len, opt->pattern,
                opt->oshort, opt->olong_len, opt->olong,
                opt->arg_name_len, opt->arg_name,
-               opt->prop & OPT_ARG_OPTIONAL ? "true" : "false",
-               (opt->prop & OPT_NEGATABLE) == OPT_NEGATABLE ? "true" : "false");
+               (opt->prop & OPT_ARG_OPTIONAL) ? "true" : "false",
+               (opt->prop & OPT_NEGATABLE) == OPT_NEGATABLE ? "true" : "false",
+               (opt->prop & OPT_NEGATED) ? "true" : "false");
     }
 
     free_options_list(options);
