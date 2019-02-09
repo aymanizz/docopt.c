@@ -6,15 +6,19 @@
 #include <stdio.h>
 #include <string.h>
 
-static inline void docopt_diagnostic(const char* level, const char* fmt, ...)
+static inline void docopt_log(
+    FILE* file, const char* level, int at,
+    int line_len, const char* line,
+    const char* fmt, ...)
 {
-    fprintf(stderr, "docopt: %s: ", level);
-
+    fprintf(file, "docopt: %s: ", level);
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    vfprintf(file, fmt, args);
     va_end(args);
-    fputs("\n", stderr);
+    fputs("\n", file);
+    if (at != -1)
+        fprintf(file, "%.*s\n%*s^-- here\n\n", line_len, line, at, "");
 }
 
 static inline const char* str_skip_line(const char* str)

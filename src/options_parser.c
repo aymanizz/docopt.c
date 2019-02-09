@@ -6,13 +6,18 @@
 #include "parser.h"
 #include "util.h"
 
-#define WARN(opt, fmt, ...) docopt_diagnostic(    \
-    "warning", "on pattern: %.*s\n" fmt "\n\n", \
-    (opt)->pattern_len, (opt)->pattern, __VA_ARGS__)
+#define WARN_AT_(opt, iter, warn_msg, ...)                  \
+    docopt_log(stderr, "warning", (iter) - (opt)->pattern, \
+        (opt)->pattern_len, (opt)->pattern,                \
+        warn_msg, __VA_ARGS__);
 
-#define ERROR(opt, fmt, ...) docopt_diagnostic( \
-    "error", "on pattern: %.*s\n" fmt "\n\n", \
-    (opt)->pattern_len, (opt)->pattern, __VA_ARGS__)
+#define ERROR_AT_(opt, iter, err_msg, ...)                  \
+    docopt_log(stderr, "warning", (iter) - (opt)->pattern, \
+        (opt)->pattern_len, (opt)->pattern,                \
+        err_msg, __VA_ARGS__);
+
+#define ERROR_AT(opt, iter, err_msg) ERROR_AT_(opt, iter, err_msg, NULL)
+#define WARN_AT(opt, iter, warn_msg) WARN_AT_(opt, iter, warn_msg, NULL)
 
 static bool is_arg_char(char c)
 {
@@ -64,9 +69,12 @@ static const char* parse_opt_arg_spec(
         arg = iter;
         while (is_arg_char(iter[len]))
             ++len;
-        if (len == 0 || iter[len] != '>') {
-            ERROR(opt, "unterminated argument name, expected '>' before '%c'.",
-                iter[len]);
+        if (len == 0) {
+            ERROR_AT(opt, iter + len, "expected an argument name.");
+            return NULL;
+        } else if (iter[len] != '>') {
+            ERROR_AT(opt, iter + len,
+                "unterminated argument name, expected '>'.");
             return NULL;
         }
         iter += len + 1;
@@ -76,7 +84,7 @@ static const char* parse_opt_arg_spec(
             ++len;
         iter += len;
     } else {
-        ERROR(opt, "expected an argument name, found '%c'", *iter);
+        ERROR_AT(opt, iter, "expected an argument name.");
         return NULL;
     }
 
@@ -85,13 +93,11 @@ static const char* parse_opt_arg_spec(
         if (strncmp(opt->arg_name, arg, len) != 0
             || is_optional != (bool)(opt->prop & OPT_ARG_OPTIONAL)) {
             // arg spec doesn't match
-            const char* old_optional =
-                (opt->prop & OPT_ARG_OPTIONAL) ? "optional " : "";
-            const char* new_optional = is_optional ? "optional " : "";
-            WARN(opt, "argument specification overrides previous one, "
-                      "expected %s'%.*s', found %s'%.*s'.",
-                old_optional, opt->arg_name_len, opt->arg_name,
-                new_optional, len, arg);
+            WARN_AT_(opt, arg,
+                "argument specification overrides previous "
+                "one, expected %s'%.*s'.",
+                (opt->prop & OPT_ARG_OPTIONAL) ? "optional " : "",
+                opt->arg_name_len, opt->arg_name);
         }
     }
 
@@ -101,7 +107,7 @@ static const char* parse_opt_arg_spec(
 
     if (is_optional) {
         if (*iter != ']') {
-            ERROR(opt, "expected ']', found '%c'.", *iter);
+            ERROR_AT(opt, iter, "expected ']'.");
             return NULL;
         }
         ++iter;
@@ -118,12 +124,12 @@ static const char* parse_long_option(
     if (*iter == '[') {
         ++iter;
         if (strncmp(iter, "no-", 3) != 0) {
-            ERROR(opt, "only [no-] is allowed, found '%c'.", *iter);
+            ERROR_AT(opt, iter, "only [no-] is allowed.");
             return NULL;
         }
         iter += 3;
         if (*iter != ']') {
-            ERROR(opt, "expected ']', found '%c'.", *iter);
+            ERROR_AT(opt, iter, "expected ']'.");
             return NULL;
         }
         ++iter;
@@ -138,7 +144,7 @@ static const char* parse_long_option(
     while (isupper(iter[len]) || is_cmd_char(iter[len]))
         ++len;
     if (len == 0) {
-        ERROR(opt, "expected an option name, found '%c'.", *iter);
+        ERROR_AT(opt, iter, "expected an option name.");
         return NULL;
     }
 
@@ -155,7 +161,7 @@ static const char* parse_long_option(
         return NULL;
 
     if (!isspace(*iter)) {
-        ERROR(opt, "unexpected character '%c'.", *iter);
+        ERROR_AT(opt, iter, "unexpected character.");
         return NULL;
     }
 
@@ -166,7 +172,7 @@ const char* parse_short_option(struct option* opt, const char* iter)
 {
     // short option pattern: /[a-zA-z0-9]/ <opt_arg_spec>?
     if (!isalnum(*iter)) {
-        ERROR(opt, "expected an alphanumeric character, found '%c'", *iter);
+        ERROR_AT(opt, iter, "expected an alphanumeric character");
         return NULL;
     }
 
@@ -214,16 +220,13 @@ struct option* get_options_list(const char* iter)
             // warn about erroneous formatting.
             if (warned_about_formatting)
                 continue;
-            const char* line = iter + col;
-            int line_len = str_skip_line(line) - line;
-            docopt_diagnostic(
-                "warning",
-                "on line: %.*s\n"
+            int line_len = str_skip_line(iter) - iter - 1;
+            docopt_log(
+                stderr, "warning", col, line_len, iter,
                 "line indentation matches that of a line with a pattern.\n"
                 "suggestion: add more indentation.\n"
                 "this warning is reported only once, subsequent formatting "
-                "errors won't be reported.\n\n",
-                line_len - 1, line);
+                "errors won't be reported.");
             warned_about_formatting = true;
             continue;
         }
@@ -259,9 +262,7 @@ struct option* get_options_list(const char* iter)
                 iter = next_col;
 
                 if (strncmp(iter, "--", 2) != 0)
-                    WARN(*opt,
-                        "expected a long option '--<option>', found '%c'.",
-                        *iter);
+                    WARN_AT(*opt, iter, "expected a long option.");
             }
         }
 
