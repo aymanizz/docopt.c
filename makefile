@@ -16,7 +16,7 @@ TARGET := docopt
 
 # Mode configuration.
 ifeq ($(MODE),debug)
-	CFLAGS += -O0 -DDEBUG -g
+	CFLAGS += -O0 -DDEBUG -g -fsanitize=address
 	OBJ_DIR := $(BUILD_DIR)/debug
 else
 	CFLAGS += -O3 -flto
