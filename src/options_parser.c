@@ -117,10 +117,16 @@ static const char* parse_opt_arg_spec(struct option* opt, const char* iter)
     return iter;
 }
 
-static const char* parse_long_option(struct option* opt, const char* iter)
+static const char* parse_long_option(
+    struct option* opt, const char* iter, const char* const end)
 {
     // long option pattern: ([no-])? /[a-zA-Z0-9_-]+/ <opt_arg_spec>
     opt->prop |= OPT_LONG;
+    if (iter == end) {
+        // special doubledash
+        opt->prop |= OPT_DOUBLEDASH;
+        return end;
+    }
     if (*iter == '[') {
         ++iter;
         if (strncmp(iter, "no-", 3) != 0) {
@@ -153,10 +159,16 @@ static const char* parse_long_option(struct option* opt, const char* iter)
     return iter;
 }
 
-const char* parse_short_option(struct option* opt, const char* iter)
+const char* parse_short_option(
+    struct option* opt, const char* iter, const char* end)
 {
     // short option pattern: /[a-zA-z0-9]/ <opt_arg_spec>?
     opt->prop |= OPT_SHORT;
+    if (iter == end) {
+        // special single dash
+        opt->prop |= OPT_DASH;
+        return end;
+    }
     if (!isalnum(*iter)) {
         ERROR_AT(opt, iter, "expected an alphanumeric character");
         return NULL;
@@ -223,7 +235,7 @@ struct option* get_options_list(const char* iter)
 
         if (iter[0] == '-' && iter[1] != '-') {
             ++iter;
-            const char* next = parse_short_option(*opt, iter);
+            const char* next = parse_short_option(*opt, iter, end);
             if (!next)
                 continue;
             iter = next;
@@ -252,7 +264,7 @@ struct option* get_options_list(const char* iter)
 
         if (!strncmp(iter, "--", 2)) {
             iter += 2;
-            const char* next = parse_long_option(*opt, iter);
+            const char* next = parse_long_option(*opt, iter, end);
             if (!next)
                 continue;
             iter = next;
