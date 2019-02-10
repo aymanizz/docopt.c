@@ -93,6 +93,8 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    const char* src = read_file(argv[1]);
-    return parse(src);
+    char* src = read_file(argv[1]);
+    int result = parse(src);
+    free(src);
+    return result;
 }
