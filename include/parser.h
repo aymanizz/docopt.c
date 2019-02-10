@@ -10,6 +10,8 @@ enum opt_prop {
     OPT_NEGATABLE = 8,
     OPT_ARG = 16,
     OPT_ARG_OPTIONAL = 32,
+    OPT_DOUBLEDASH = 64,
+    OPT_DASH = 128,
 };
 
 struct option {

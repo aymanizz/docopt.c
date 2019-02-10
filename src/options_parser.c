@@ -6,12 +6,12 @@
 #include "parser.h"
 #include "util.h"
 
-#define WARN_AT_(opt, iter, warn_msg, ...)                  \
+#define WARN_AT_(opt, iter, warn_msg, ...)                 \
     docopt_log(stderr, "warning", (iter) - (opt)->pattern, \
         (opt)->pattern_len, (opt)->pattern,                \
         warn_msg, __VA_ARGS__);
 
-#define ERROR_AT_(opt, iter, err_msg, ...)                  \
+#define ERROR_AT_(opt, iter, err_msg, ...)                 \
     docopt_log(stderr, "warning", (iter) - (opt)->pattern, \
         (opt)->pattern_len, (opt)->pattern,                \
         err_msg, __VA_ARGS__);
@@ -38,48 +38,25 @@ void free_options_list(struct option* opt)
     }
 }
 
-static const char* parse_opt_arg_spec(
-    struct option* opt, const char* iter)
+static const char* parse_argument(struct option* opt, const char* iter)
 {
-    // pattern: ( <arg> | '=' <arg> | '[' '='? <arg> ']'
-    //          | ' ' <arg> | " [" <arg> ']' )
-    // where
-    //          <arg> = '<' /[a-z0-9_- ]+/ '>'
-    //                | /[A-Z]+[a-z0-9_- ]*/
-
-    bool has_space = false;
-    if (*iter == ' ') {
-        ++iter;
-        has_space = true;
-    }
-
-    bool is_optional = false;
-    if (*iter == '[') {
-        ++iter;
-        is_optional = true;
-    }
-
-    if (!has_space && *iter == '=')
-        ++iter;
-
+    // pattern: <arg> = '<' /[a-z0-9_- ]+/ '>' | /[A-Z]+[a-z0-9_- ]*/
     int len = 0;
-    const char* arg;
+    const char* arg = iter;
     if (*iter == '<') {
-        ++iter;
-        arg = iter;
-        while (is_arg_char(iter[len]))
+        ++arg;
+        while (is_arg_char(arg[len]))
             ++len;
         if (len == 0) {
-            ERROR_AT(opt, iter + len, "expected an argument name.");
+            ERROR_AT(opt, arg + len, "expected an argument name.");
             return NULL;
-        } else if (iter[len] != '>') {
-            ERROR_AT(opt, iter + len,
+        } else if (arg[len] != '>') {
+            ERROR_AT(opt, arg + len,
                 "unterminated argument name, expected '>'.");
             return NULL;
         }
-        iter += len + 1;
+        iter += len + 2;
     } else if (isupper(*iter)) {
-        arg = iter;
         while (isupper(iter[len]) && is_cmd_char(tolower(iter[len])))
             ++len;
         iter += len;
@@ -88,22 +65,45 @@ static const char* parse_opt_arg_spec(
         return NULL;
     }
 
-    bool new_spec = !(opt->prop & OPT_ARG);
-    if (!new_spec) {
-        if (strncmp(opt->arg_name, arg, len) != 0
-            || is_optional != (bool)(opt->prop & OPT_ARG_OPTIONAL)) {
-            // arg spec doesn't match
-            WARN_AT_(opt, arg,
-                "argument specification overrides previous "
-                "one, expected %s'%.*s'.",
-                (opt->prop & OPT_ARG_OPTIONAL) ? "optional " : "",
-                opt->arg_name_len, opt->arg_name);
-        }
-    }
-
     opt->arg_name = arg;
     opt->arg_name_len = len;
     opt->prop |= OPT_ARG;
+    return iter;
+}
+
+static const char* parse_opt_arg_spec(struct option* opt, const char* iter)
+{
+    // pattern: '[' '='? <arg> ']' | '=' <arg> | <arg>
+    bool is_optional = false;
+    if (*iter == '[') {
+        ++iter;
+        is_optional = true;
+    }
+
+    if (*iter == '=')
+        ++iter;
+
+    // save old spec data
+    const char* old_arg = opt->arg_name;
+    int old_len = opt->arg_name_len;
+    enum opt_prop old_prop = opt->prop;
+
+    iter = parse_argument(opt, iter);
+    if (!iter)
+        return NULL;
+
+    if (old_prop & OPT_ARG) {
+        if (opt->arg_name_len != old_len
+            || strncmp(opt->arg_name, old_arg, old_len) != 0
+            || is_optional != (bool)(old_prop & OPT_ARG_OPTIONAL)) {
+            // arg spec doesn't match
+            WARN_AT_(opt, old_arg,
+                "argument specification overrides previous "
+                "one, expected %s'%.*s'.",
+                (old_prop & OPT_ARG_OPTIONAL) ? "optional " : "",
+                old_len, old_arg);
+        }
+    }
 
     if (is_optional) {
         if (*iter != ']') {
@@ -117,10 +117,10 @@ static const char* parse_opt_arg_spec(
     return iter;
 }
 
-static const char* parse_long_option(
-    struct option* opt, const char* iter)
+static const char* parse_long_option(struct option* opt, const char* iter)
 {
     // long option pattern: ([no-])? /[a-zA-Z0-9_-]+/ <opt_arg_spec>
+    opt->prop |= OPT_LONG;
     if (*iter == '[') {
         ++iter;
         if (strncmp(iter, "no-", 3) != 0) {
@@ -134,9 +134,7 @@ static const char* parse_long_option(
         }
         ++iter;
         opt->prop |= OPT_NEGATABLE;
-    }
-
-    if (!strncmp(iter, "no-", 3)) {
+    } else if (!strncmp(iter, "no-", 3)) {
         opt->prop |= OPT_NEGATED;
     }
 
@@ -152,25 +150,13 @@ static const char* parse_long_option(
     opt->olong_len = len;
     iter += len;
 
-    if (*str_skip_blank(iter) == '\n' || !strncmp(iter, "  ", 2)) {
-        return iter;
-    }
-
-    iter = parse_opt_arg_spec(opt, iter);
-    if (!iter)
-        return NULL;
-
-    if (!isspace(*iter)) {
-        ERROR_AT(opt, iter, "unexpected character.");
-        return NULL;
-    }
-
     return iter;
 }
 
 const char* parse_short_option(struct option* opt, const char* iter)
 {
     // short option pattern: /[a-zA-z0-9]/ <opt_arg_spec>?
+    opt->prop |= OPT_SHORT;
     if (!isalnum(*iter)) {
         ERROR_AT(opt, iter, "expected an alphanumeric character");
         return NULL;
@@ -179,15 +165,6 @@ const char* parse_short_option(struct option* opt, const char* iter)
     opt->oshort = *iter;
     ++iter;
 
-    const char* end = str_skip_blank(iter);
-    if (!*end || *end == ',' || *end == '\n' || !strncmp(iter, "  ", 2)) {
-        return iter;
-    }
-
-    iter = parse_opt_arg_spec(opt, iter);
-    if (!iter)
-        return NULL;
-
     return iter;
 }
 
@@ -195,13 +172,14 @@ struct option* get_options_list(const char* iter)
 {
     // options pattern : /^\w+/ ( ( '--' <long_opt> )
     //                 | ( '-' <short_opt> ((/,\w+/ | ' ') '--' long_opt>)? ) )
-
     struct option* head = NULL;
     struct option** opt = &head;
     // for tracking the patterns column start
     int indent = -1;
     // used to report warning about erroneous non-pattern formatting only once
     bool warned_about_formatting = false;
+    // the pattern line end
+    const char* end = NULL;
 
     // options section end with an unindented line (has an indentation level
     // that is below the indentation level of option patterns), or a line that
@@ -232,49 +210,64 @@ struct option* get_options_list(const char* iter)
         }
         iter += col;
 
-        int pattern_len = 0;
-        while (iter[pattern_len] && strncmp(iter + pattern_len, "  ", 2) != 0
-            && iter[pattern_len] != '\n') {
-            ++pattern_len;
-        }
+        end = iter;
+        while (*end && strncmp(end, "  ", 2) != 0 && *end != '\n')
+            ++end;
 
         if (!*opt)
             *opt = calloc(1, sizeof(**opt));
         else
             memset(*opt, 0, sizeof(**opt));
         (*opt)->pattern = iter;
-        (*opt)->pattern_len = pattern_len;
+        (*opt)->pattern_len = end - iter;
 
         if (iter[0] == '-' && iter[1] != '-') {
-            // TODO: handle special case "-" used commonly for stdin
-            const char* short_end = parse_short_option(*opt, iter + 1);
-            if (!short_end)
+            ++iter;
+            const char* next = parse_short_option(*opt, iter);
+            if (!next)
                 continue;
-            iter = short_end;
+            iter = next;
 
-            const char *next_col = str_skip_blank(iter);
-            if (*next_col == ',' || strncmp(iter, "  ", 2) != 0) {
-                // seperator one of: ' ' | ',' |
-                if (*next_col == ',') {
-                    ++next_col;
-                    next_col = str_skip_blank(next_col);
+            next = str_skip_blank(iter);
+            if (iter != end && *next != ',' && *next != '-') {
+                next = parse_opt_arg_spec(*opt, next);
+                if (!next)
+                    continue;
+                iter = next;
+                next = str_skip_blank(iter);
+            }
+
+            if (iter != end && (isspace(*iter) || *next == ',')) {
+                if (*next == ',') {
+                    ++next;
+                    next = str_skip_blank(next);
                 }
-                iter = next_col;
-
-                if (strncmp(iter, "--", 2) != 0)
-                    WARN_AT(*opt, iter, "expected a long option.");
+                iter = next;
+                if (strncmp(iter, "--", 2) != 0) {
+                    ERROR_AT(*opt, iter, "expected a long option.");
+                    continue;
+                }
             }
         }
 
         if (!strncmp(iter, "--", 2)) {
-            // TODO: handle special case "--" used commonly for stopping
-            // options parsing
-            const char* long_end = parse_long_option(*opt, iter + 2);
-            if (!long_end)
+            iter += 2;
+            const char* next = parse_long_option(*opt, iter);
+            if (!next)
                 continue;
-            iter = long_end;
+            iter = next;
+            if (iter != end) {
+                next = parse_opt_arg_spec(*opt, str_skip_blank(iter));
+                if (!next)
+                    continue;
+                iter = next;
+            }
         }
 
+        if (iter != end) {
+            ERROR_AT(*opt, iter, "unexpected character.");
+            continue;
+        }
         opt = &(*opt)->next;
     }
 
