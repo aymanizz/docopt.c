@@ -29,16 +29,16 @@ static bool is_cmd_char(char c)
     return (islower(c) || isdigit(c) || c == '_' || c == '-');
 }
 
-void free_options_list(struct option* opt)
+void free_options_list(struct opt_spec* opt)
 {
     while (opt) {
-        struct option* del = opt;
+        struct opt_spec* del = opt;
         opt = opt->next;
         free(del);
     }
 }
 
-static const char* parse_argument(struct option* opt, const char* iter)
+static const char* parse_argument(struct opt_spec* opt, const char* iter)
 {
     // pattern: <arg> = '<' /[a-z0-9_- ]+/ '>' | /[A-Z]+[a-z0-9_- ]*/
     int len = 0;
@@ -71,7 +71,7 @@ static const char* parse_argument(struct option* opt, const char* iter)
     return iter;
 }
 
-static const char* parse_opt_arg_spec(struct option* opt, const char* iter)
+static const char* parse_opt_arg_spec(struct opt_spec* opt, const char* iter)
 {
     // pattern: '[' '='? <arg> ']' | '=' <arg> | <arg>
     bool is_optional = false;
@@ -118,7 +118,7 @@ static const char* parse_opt_arg_spec(struct option* opt, const char* iter)
 }
 
 static const char* parse_long_option(
-    struct option* opt, const char* iter, const char* const end)
+    struct opt_spec* opt, const char* iter, const char* const end)
 {
     // long option pattern: ([no-])? /[a-zA-Z0-9_-]+/ <opt_arg_spec>
     opt->prop |= OPT_LONG;
@@ -160,7 +160,7 @@ static const char* parse_long_option(
 }
 
 const char* parse_short_option(
-    struct option* opt, const char* iter, const char* end)
+    struct opt_spec* opt, const char* iter, const char* end)
 {
     // short option pattern: /[a-zA-z0-9]/ <opt_arg_spec>?
     opt->prop |= OPT_SHORT;
@@ -180,12 +180,12 @@ const char* parse_short_option(
     return iter;
 }
 
-struct option* get_options_list(const char* iter)
+struct opt_spec* get_options_list(const char* iter)
 {
     // options pattern : /^\w+/ ( ( '--' <long_opt> )
     //                 | ( '-' <short_opt> ((/,\w+/ | ' ') '--' long_opt>)? ) )
-    struct option* head = NULL;
-    struct option** opt = &head;
+    struct opt_spec* head = NULL;
+    struct opt_spec** opt = &head;
     // for tracking the patterns column start
     int indent = -1;
     // used to report warning about erroneous non-pattern formatting only once

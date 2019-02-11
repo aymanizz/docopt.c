@@ -14,7 +14,7 @@ enum opt_prop {
     OPT_DASH = 128,
 };
 
-struct option {
+struct opt_spec {
     enum opt_prop prop;
     char oshort;
     int pattern_len;
@@ -23,10 +23,10 @@ struct option {
     const char* pattern;
     const char* olong;
     const char* arg_name;
-    struct option* next;
+    struct opt_spec* next;
 };
 
-void free_options_list(struct option* opt);
-struct option* get_options_list(const char* iter);
+void free_options_list(struct opt_spec* opt);
+struct opt_spec* get_options_list(const char* iter);
 
 #endif

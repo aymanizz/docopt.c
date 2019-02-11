@@ -69,12 +69,11 @@ const char* find_doc_pattern(const char* str, const char* const pattern)
 static int parse(const char* src)
 {
     const char* options_start = find_doc_pattern(src, "OPTIONS");
-    struct option* options = get_options_list(options_start);
+    struct opt_spec* options = get_options_list(options_start);
 
-    for (struct option* opt = options; opt; opt = opt->next) {
-        printf("option ( %.*s ):\n\t %c | %.*s:\n\targ=%.*s, optional=%s, "
+    for (struct opt_spec* opt = options; opt; opt = opt->next) {
+        printf("%c | %.*s:\targ=%.*s, optional=%s, "
                "negatable=%s, negated=%s\n\n",
-               opt->pattern_len, opt->pattern,
                opt->oshort, opt->olong_len, opt->olong,
                opt->arg_name_len, opt->arg_name,
                (opt->prop & OPT_ARG_OPTIONAL) ? "true" : "false",
