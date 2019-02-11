@@ -17,13 +17,15 @@ enum opt_prop {
 struct opt_spec {
     enum opt_prop prop;
     char oshort;
-    int pattern_len;
     int olong_len;
-    int arg_name_len;
-    const char* pattern;
     const char* olong;
-    const char* arg_name;
+    struct arg_spec* arg;
     struct opt_spec* next;
+};
+
+struct arg_spec {
+    const char* name;
+    int length;
 };
 
 void free_options_list(struct opt_spec* opt);

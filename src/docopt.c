@@ -75,7 +75,7 @@ static int parse(const char* src)
         printf("%c | %.*s:\targ=%.*s, optional=%s, "
                "negatable=%s, negated=%s\n\n",
                opt->oshort, opt->olong_len, opt->olong,
-               opt->arg_name_len, opt->arg_name,
+               opt->arg ? opt->arg->length : 0, opt->arg ? opt->arg->name : "",
                (opt->prop & OPT_ARG_OPTIONAL) ? "true" : "false",
                (opt->prop & OPT_NEGATABLE) == OPT_NEGATABLE ? "true" : "false",
                (opt->prop & OPT_NEGATED) ? "true" : "false");
